@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wave_config>
+   <wave_state>
+   </wave_state>
+   <db_ref_list>
+      <db_ref path="tb_data_selector_behav.wdb" id="1">
+         <top_modules>
+            <top_module name="glbl" />
+            <top_module name="tb_data_selector" />
+         </top_modules>
+      </db_ref>
+   </db_ref_list>
+   <zoom_setting>
+      <ZoomStartTime time="0fs"></ZoomStartTime>
+      <ZoomEndTime time="210000001fs"></ZoomEndTime>
+      <Cursor1Time time="163837000fs"></Cursor1Time>
+   </zoom_setting>
+   <column_width_setting>
+      <NameColumnWidth column_width="115"></NameColumnWidth>
+      <ValueColumnWidth column_width="101"></ValueColumnWidth>
+   </column_width_setting>
+   <WVObjectSize size="10" />
+   <wvobject type="logic" fp_name="/tb_data_selector/clk_i">
+      <obj_property name="ElementShortName">clk_i</obj_property>
+      <obj_property name="ObjectShortName">clk_i</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/data_i">
+      <obj_property name="ElementShortName">data_i[7:0]</obj_property>
+      <obj_property name="ObjectShortName">data_i[7:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/adr_i">
+      <obj_property name="ElementShortName">adr_i[1:0]</obj_property>
+      <obj_property name="ObjectShortName">adr_i[1:0]</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/tb_data_selector/read_sig_i">
+      <obj_property name="ElementShortName">read_sig_i</obj_property>
+      <obj_property name="ObjectShortName">read_sig_i</obj_property>
+   </wvobject>
+   <wvobject type="logic" fp_name="/tb_data_selector/write_sig_i">
+      <obj_property name="ElementShortName">write_sig_i</obj_property>
+      <obj_property name="ObjectShortName">write_sig_i</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/data_o">
+      <obj_property name="ElementShortName">data_o[7:0]</obj_property>
+      <obj_property name="ObjectShortName">data_o[7:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/cell_1_r">
+      <obj_property name="ElementShortName">cell_1_r[7:0]</obj_property>
+      <obj_property name="ObjectShortName">cell_1_r[7:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/cell_2_r">
+      <obj_property name="ElementShortName">cell_2_r[7:0]</obj_property>
+      <obj_property name="ObjectShortName">cell_2_r[7:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/cell_3_r">
+      <obj_property name="ElementShortName">cell_3_r[7:0]</obj_property>
+      <obj_property name="ObjectShortName">cell_3_r[7:0]</obj_property>
+   </wvobject>
+   <wvobject type="array" fp_name="/tb_data_selector/cell_4_r">
+      <obj_property name="ElementShortName">cell_4_r[7:0]</obj_property>
+      <obj_property name="ObjectShortName">cell_4_r[7:0]</obj_property>
+   </wvobject>
+</wave_config>

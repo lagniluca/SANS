@@ -1,0 +1,70 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: Cugini Lorenzo
+// 
+// Create Date: 03.04.2019 12:15:11
+// Design Name: 
+// Module Name: tb_bit_slicer
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module tb_bit_slicer();
+
+reg clk_i;
+reg rst_i;
+reg sel_i;
+reg [31:0] data_i;
+wire [15:0] data_o;
+wire [15:0] selected;
+
+bit_slicer bs ( .clk_i(clk_i), .rst_i(rst_i), .sel_i(sel_i), .data_i(data_i), .data_o(data_o), .selected(selected) );
+
+always #5 clk_i = ~clk_i;
+
+initial
+begin
+    clk_i <= 0;
+    rst_i <= 1;
+    sel_i <= 0;
+    data_i <= 0;
+    
+    @(posedge clk_i);
+    @(posedge clk_i);
+    
+    rst_i = 0;
+    
+    @(posedge clk_i);
+    @(posedge clk_i);
+    @(posedge clk_i);
+    
+    data_i = 783;
+    
+    @(posedge clk_i);
+    
+    sel_i = 1;
+    
+    @(posedge clk_i);
+    @(posedge clk_i);
+    @(posedge clk_i);
+    
+    rst_i = 1;
+    
+    @(posedge clk_i);
+    @(posedge clk_i);
+    
+    $finish;
+end
+
+endmodule

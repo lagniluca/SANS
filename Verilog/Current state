@@ -1,0 +1,18 @@
+BASIC EXAMPLES
+    -   Tested on Vivado, testbench module not uploaded
+
+CLOCK MULTIPLIER Current State
+    -   Tested on Vivado
+    -   Parsed on Yosys
+
+CLOCK DIVIDER Current State
+    -   Tested on Vivado
+    -   Parsed on Yosys
+
+DIRECTDATA Current State
+    -   Tested on Vivado
+    -   Parsed on Yosys
+
+NODIRECTDATA Current State
+    -   Tested on Vivado
+    -   Parsed on Yosys

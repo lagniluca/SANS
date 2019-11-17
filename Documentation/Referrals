@@ -1,0 +1,19 @@
+MPU REFERENCES
+-------------------------------------------------------------------------------------------------------------------------------------
+
+ARMv7-M Architecture referral : https://web.eecs.umich.edu/~prabal/teaching/eecs373-f10/readings/ARMv7-M_ARM.pdf
+
+ARMv8-M MPU (PDF): https://static.docs.arm.com/100699/0100/armv8m_architecture_memory_protection_unit_100699_0100_00_en.pdf
+
+Cortex-M4 technical referral  : http://infocenter.arm.com/help/topic/com.arm.doc.ddi0439b/DDI0439B_cortex_m4_r0p0_trm.pdf
+
+KeyStone Architecture MPU: http://www.ti.com/lit/ug/sprugw5a/sprugw5a.pdf
+
+
+
+YOSYS REFERENCES
+-------------------------------------------------------------------------------------------------------------------------------------
+
+http://www.clifford.at/yosys/
+
+https://github.com/YosysHQ/yosys

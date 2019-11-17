@@ -1,0 +1,2 @@
+The project includes the possibility to output the results with various formats. One of the most prominent is the XML format. To encourage its use, we include a SAXParser of said file.
+The SAXParser is implemented in Java JDK 12.0, so said JDK (or above) is required.

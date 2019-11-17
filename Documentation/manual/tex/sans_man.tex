@@ -1,0 +1,2509 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% University/School Laboratory Report
+% LaTeX Template
+% Version 3.1 (25/3/14)
+%
+% This template has been downloaded from:
+% http://www.LaTeXTemplates.com
+%
+% Original author:
+% Linux and Unix Users Group at Virginia Tech Wiki 
+% (https://vtluug.org/wiki/Example_LaTeX_chem_lab_report)
+%
+% Current authors:
+% Lorenzo Cugini, Luca Lagni
+% (Politecnico di Milano, Italy)
+%
+% License:
+% CC BY-NC-SA 3.0 (http://creativecommons.org/licenses/by-nc-sa/3.0/)
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND DOCUMENT CONFIGURATIONS
+%----------------------------------------------------------------------------------------
+
+\documentclass{article}
+
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+\usepackage{siunitx} % Provides the \SI{}{} and \si{} command for typesetting SI units
+\usepackage{graphicx} % Required for the inclusion of images
+\usepackage{enumerate}
+\usepackage{color}
+\usepackage{array}
+\usepackage{tabularx, caption}
+\usepackage{multirow}
+\usepackage[framemethod=tikz]{mdframed}% For highlighting paragraph backgrounds
+\usepackage{multicol}
+\usepackage{rotating}
+\usepackage{graphics}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{titlesec}
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{language=C++,
+	basicstyle=\ttfamily,
+	breaklines=true,
+	showstringspaces=false,
+	columns=flexible,
+	keywordstyle=\color{blue}\ttfamily,
+	stringstyle=\color{red}\ttfamily,
+	commentstyle=\color{mauve}\ttfamily,
+	morecomment=[l][\color{magenta}]{\#}
+}
+
+\setlength\parindent{0pt} % Removes all indentation from paragraphs
+
+\renewcommand{\labelenumi}{\alph{enumi}.} % Make numbering in the enumerate environment by letter rather than number (e.g. section 6)
+
+\newcommand{\sectionbreak}{\clearpage}
+
+\usepackage{times} % Uncomment to use the Times New Roman font
+
+%----------------------------------------------------------------------------------------
+%	DOCUMENT INFORMATION
+%----------------------------------------------------------------------------------------
+
+\title{SANS \\Yosys signals analyzer module \\} % Title
+
+\author{Lorenzo \textsc{Cugini} \\ Luca \textsc{Lagni}} % Author name
+
+\begin{document}
+
+\maketitle % Insert the title, author and date
+
+\begin{center}
+\begin{tabular}{l r}
+Date Performed: & May 3, 2019 \\ % Date the project was completed 
+Professor: & Professor Zoni Davide % Instructor/supervisor
+\end{tabular}
+\end{center}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 1
+%----------------------------------------------------------------------------------------
+
+\section{Abstract}
+
+The project aims at analyzing input signals of a given Verilog specification. \\
+
+The basic idea we've based our work upon is a construction of an hypergraph statring from the Verilog code.\\
+At hyper-level each node represents a Verilog module whose connections to other modules mirror the high-level configuration of the circuit.\\
+Inside each node we find another graph, this time nodes represent components like simple gates.\\
+By running a DFS algorithm we're able to analyze each path a signal can take from its beginning.Every time the signal enters a selection port, we mark it as selection. Same reasoning undergoes data marking.\\
+After the analysis has been performed, we convert the result in a readable format. By specifying options with command line, various files may be generated, including a .txt, .xml (you can also find a SAX parser in Java if you need to use the XML result), .json and .csv.\\
+
+%----------------------------------------------------------------------------------------
+%	SECTION 2
+%----------------------------------------------------------------------------------------
+
+\section{The pass module}\index{About pass module}
+
+The \textit{pass.cc} is the files where we have defined the code of the \textbf{\textit{sans}} command, the one used for building a graph of 
+the design (i.e. the modules and their connections) passed to Yosys at run time and for analyzing its input signals , in order to decree if they can be 
+categorized as \textit{selection} and/or \textit{data} signals.\\
+When compiled and linked within Yosys, the \textbf{\textit{sans}} command can be called.
+
+\par\noindent\rule{\textwidth}{0.4pt}
+
+\begin{lstlisting}[language=bash,caption={bash command for compiling the pass.cc external module}]
+#!/bin/bash
+yosys-config --build pass.so pass.cc circuit.cc
+\end{lstlisting}
+
+\par\noindent\rule{\textwidth}{0.4pt}
+
+The dependency of the \textit{circuit.cc} is due to the fact that we have modified such file in order to manage the connection bits and, doing
+so, we are not using the default version in this case , so we have to add this file when we want to compile the \textit{pass.cc}.
+
+\par\noindent\rule{\textwidth}{0.4pt}
+
+\begin{lstlisting}[language=bash,caption={command for linking the previously compiled external module in Yosys}]
+#!/bin/bash
+yosys -m pass.so
+\end{lstlisting}
+
+\par\noindent\rule{\textwidth}{0.4pt}
+
+\textbf{Using the \textit{sans} command} 
+\begin{lstlisting}[language=bash,caption={}]
+#!/bin/bash
+	yosys-config --build pass.so pass.cc circuit.cc
+	yosys -m pass.so -p "read_verilog file1.v...fileN.v; proc; sans"
+\end{lstlisting}
+
+\par\noindent\rule{\textwidth}{0.4pt}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	PART 1
+%----------------------------------------------------------------------------------------
+
+\part{Basic Architecture}
+
+This section explains the basic elements on which the external module is build upon.\\
+They're used for represents RTLIL equivalent data but storing information that are useful to our purpose in a convenient way.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=dkgreen!10]
+	\begin{lstlisting}
+	signal_library.h
+	port_library.h
+	node_library.h
+	generator_library.h
+	supportGraph.h
+	\end{lstlisting}
+\end{mdframed}
+
+\underline{\textit{Note 1:}} in the following sections we have usually report also private attributes/methods in order to allow a better understanding of our design choices and make our solutions easier to read.\\
+
+\textit{\underline{Note 2: }} We have listed all the public methods / functions but we have listed private methods, functions or attributes only when relevant.\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 3
+%----------------------------------------------------------------------------------------
+
+\section{Signal}
+
+Namespace that contains both a class that represents a signal (called Signal) and methods used to operate over such structures or 
+collections of them in a static way.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & signal\_library.h\\
+	\textbf{Implementation File:} & signal\_library.cc\\
+	\textbf{Namespace: } & Signal\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+//Constants
+EMPTYSIGNAL "empty"
+//Signal class
+Class Signal{...};
+//static methods
+bool isIn(std::vector<Signal> haystack,Signal needle);
+bool isIn_byNameOnly(std::vector<Signal> haystack, Signal needle);
+std::vector<Signal> conditionalInsert_checkSignalName(std::vector<Signal> vector,Signal signal);
+bool compare(const Signal& sig_1,const Signal& sig_2);
+std::vector<Signal> sort(std::vector<Signal> vector);
+Signal fetchSignal(std::vector<Signal> vec,std::signal sigName);
+	\end{lstlisting}
+\end{mdframed}
+
+The different parts of the Signal namspace will be explained in the following sections.\\
+
+\subsection{Signal class}
+
+This class has been used for representing signals that are exchanged between design components or with the external environment.\\
+Since such physical signal can be used as a whole or only parts of them, they're representative of both RTLIL::Wire and RTLIL::Chunk elements 
+(depending on their Yosys equivalent).\\
+Since for our project only physical signals are relevat , every Signal instance will be associated to one of those signals (constants values which are associated to empty or unimportant values have not been taken into account).\\
+
+\begin{tabular}{ll}
+	\textbf{Namespace: } & Signal\\
+	\textbf{External usage: } & Signal::Signal\\
+	\textbf{Yosys equivalent: } & RTLIL::Chunk , RTLIL::Wire\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string signalName;
+	std::pair<int, int> dimensionPair;
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{signalName}\\
+	label associated to the signal, equivalent to the one given in the corresponding verilog file.\\\\
+\textbf{dimensionPair }\\
+	couple of int that repsenents the MSB (Most Significant Bit) and the LSB (Less Significant Bit) of the signal.\\\\
+	
+\subsubsection{Public Constructors}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	Signal();
+	Signal(std::string signalName,int MSB,int LSB);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{Signal(...)}\\
+constructor used only for temporary purposes \textbf{?}\\\\
+\textbf{Signal(std::string signalName,int MSB,int LSB)}\\
+constructor used for instantiating a Signal, if the signal is a single wire MSB = LSB.\\\\
+
+\subsubsection{Public Getter Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string getSignalName();
+	std::pair<int, int> getDimensionPair();
+	int getMSB();
+	int getLSB();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{getSignalName(...)}\\
+getter for the signalName parameter.\\\\
+\textbf{getDimensionPair(...)}\\
+getter for the dimension pair couple (MSB, LSB).\\\\
+\textbf{getMSB(...)}\\
+getter for the Most Significant Bit associated to a Signal\\\\
+\textbf{getLSB(...)}\\
+getter for the Less Significant Bit associated to a Signal.\\\\
+	
+\subsubsection{Public Utility Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	bool isEmpty();
+	int width();
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{isEmpty()}\\
+method used to decree if a signal is associated to some external signal.\\
+Retrurns true if the two signals are equivalent, false otherwise.\\\\
+\textbf{width()}\\
+method that returns the width of a signal (MSB - LSB + 1) as int.\\\\
+\textbf{toString()}\\
+mathod used for providing a human-readable representation of the signal in a string format\\\\
+
+\subsubsection{Operators}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	friend bool operator==(const Signal& sig_1,const Signal& sig_2);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{operator==}\\
+comparison operator, returns true in case of two equivalent Signals (they're considered equivalent if they have the same name, same MSB and same LSB)\\\\
+
+\subsection{Constants}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	EMPTYSIGNAL "empty"
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{EMPTYSIGNAL}\\
+constant used to describe a port that is not used (i.e. it is not associated to any signal).\\\\
+
+\subsection{Static Methods}
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=green!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	bool isIn(std::vector<Signal> haystack,Signal needle);
+	bool isIn_byNameOnly(std::vector<Signal> haystack, Signal needle);
+	std::vector<Signal> conditionalInsert_checkSignalName(std::vector<Signal> vector,Signal signal);
+	bool compare(const Signal& sig_1,const Signal& sig_2);
+	std::vector<Signal> sort(std::vector<Signal> vector);
+	Signal fetchSignal(std::vector<Signal> vec,std::signal sigName);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{isIn(...)}\\
+check if the (needle) signal is in the passed (haystack) list, based on name, MSB and LSB equivalence\\\\
+\textbf{isIn\_byNameOnly(...)}\\
+like isIn but checks only on signal name equivalence.\\\\
+\textbf{conditionalInsert\_checkSignalName(...)}\\
+method used for inserting a new Signal into a list iff  the list doesn't have any signals with the same name already in.\\\\
+\textbf{compare(...)}\\
+comparison between two signals based on their name, MSB and LSB values.\\\\
+\textbf{sort(...)}\\
+method used for sorting a vector of signals\\\\
+\textbf{fetchSignal(...)}\\
+method used for retriving a signal from a list based on its name\\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 4
+%----------------------------------------------------------------------------------------
+
+\section{Port}
+
+Namespace that contains several components used to represent (and operate) the equivalent of pins for a component.\\
+Stricly speaking, the Port struct is equivalent to an RTLIL::Cell.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & port\_library.h\\
+	\textbf{Implementation File:} & port\_library.cc\\
+	\textbf{Namespace: } & Graph\_Port\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Enums
+	enum PortDirection{...}
+	//Port class
+	class Port{...};
+	\end{lstlisting}
+\end{mdframed}
+
+The different parts of the Port namspace will be explained in the following sections.\\
+
+\subsection{Enum}
+
+The purpose of this enum is to define a fixed number of possible values associated to the direction of a port.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=gray!10]
+	\begin{lstlisting}
+	INVALID;
+	INPUT;
+	OUTPUT;
+	INOUT;
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{INVALID}\\
+label associated to a port that has an unknown port direction which , in our case, it's a mistaken\\\\
+\textbf{INPUT}\\
+label associated to an input port\\\\
+\textbf{OUTPUT}\\
+label associated to an output port\\\\
+\textbf{INOUT}\\
+label associated to an input-output port\\\\
+
+\subsection{Port Class}
+
+This class has been used for representing post (i.e. pins) associated to a circuit component.\\
+Their Yosys equivalent are the RTLIL::Cell elements.\\
+Ports are the endpoints for signals when they're defined as communications paths between nodes.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & Graph\_Port::Port\\
+	\textbf{Yosys equivalent: } & RTLIL::Cell\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string portName;
+	int portId;
+	PortDirection direction;
+	pool<int> edges;
+	std::vector<Signal::Signal> inputSignals;
+	std::vector<Signal::Signal> outputSignals;
+	bool connectedToExtern;
+	\end{lstlisting}
+\end{mdframed}
+
+Here it's easy to see that inputSignals and outputSignals are declined as vectors, this means that a port can have associated a single signal (direct wire) or 
+multiple signals (bus).\\
+
+\textbf{portName}\\
+label associated to the port\\\\
+\textbf{portId}\\
+integer value used for idenify the port associated to a specific component (it will be used for analyzing connection between nodes).\\\\
+\textbf{direction}\\
+type signals direction associated to a specific port\\\\
+\textbf{edges}\\
+set of references of other ports that are directly connected to this one\\\\
+\textbf{inputSignals}\\
+set of signals that enters in the port in case of input or inout port\\\\
+\textbf{outputSignals}\\
+set of signals that exit from the port in case of output or inout port\\\\
+\textbf{connectedToExtern}\\
+boolean flag used to decree if a port is associated to an \underline{output} of a module.\\
+It is only used in case of output or inout ports\\\\
+
+\subsubsection{Public Methods}
+
+This section lists all the methods available for the Port struct.\\
+Their meaning and usage will be explained later when needed.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	public:
+		//Constructors
+		Port();
+		Port(std::string portName);
+		Port(std::string portName,int portId);
+		Port(std::string portName,PortDirection direction);
+		Port(std::string portName,PortDirection direction, int portID);
+		//Canonical getters
+		std::string getPortName();
+		int getPortId();
+		PortDirection getDirection();
+		pool<int> getEdges();
+		std::vector<Signal::Signal> getInputSignals();
+		std::vector<Signal::Signal> getOutputSignals();
+		bool isConnectedToExtern();
+		//Non-canonical getters
+		std::vector<Signal::Signal> getSignals();
+		//Setters
+		void setConnectionToExtern(bool conn);
+		void setDirection(PortDirection dir);
+		//Booleans
+		bool isValidPortDirection();
+		bool isInputPort();
+		bool isOutputPort();
+		bool isInOutPort();
+		bool isInvalidPort();
+		//Adders
+		void pushInputSignals(Signal::Signal sig);
+		void pushOutputSignals(Signal::Signal sig);
+		void pushInOutSignal(Signal::Signal sig);
+		void addEdge(int edgeId);
+		//toString();
+		std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Constructors}
+
+In this section we are going to only lists constructors methods because we think that 
+the previous explanation that we have done before for associated attributes can already defines their purposes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	Port();
+	Port(std::string portName);
+	Port(std::string portName,int portId);
+	Port(std::string portName,PortDirection direction);
+	Port(std::string portName,PortDirection direction, int portID);
+	\end{lstlisting}
+\end{mdframed}
+
+\textit{\underline{note: }} Here we have several different constructors because we can set in a further moments the parameters for a specific port.\\
+In particular, it's in the graph build phase that we differ the setup of a port parameters.\\
+
+%\textbf{Port()}\\
+%constructor used when we want to set the parameters for a specific port in another moment.\\\\
+%\textbf{Port(std::string portName)}\\
+%Constructor used to assign only a name to a port.\\\\
+
+\subsubsection{Canonical Getter Methods}
+
+In this section we are going to only lists the getter methods for the associated attributes , since we think that 
+the previous explanation that we have done before for such attributes can already defines their purposes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string getPortName();
+	int getPortId();
+	PortDirection getPortDirection();
+	pool<int> getEdges();
+	std::vector<Signal::Signal> getInputSignals();
+	std::vector<Signal::SIgnal> getOutputSignals();
+	bool isConnectedToExtern();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Non-canonical Getter Methods}
+
+This getter methods are called non canonical in the sens that they're not associated to class/strcut attributes but rather on groups or manipulations perfomed on such attributes.\\
+Their meaning and usage will be explained in the following section.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::vector<Signal::Signal> getSignals();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{getSignals()}\\
+Method that returns all the Signals associated to a port , that can be Input, Output or Inout.\\\\
+
+\subsubsection{Setter Methods}
+
+These setter methods are used for setting attributes of the port.\\
+Their meaning will be explained only when required since we think that the previous explanation about the struct attributes has explained enough their corresponding purposes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	void setConnectionToExtern(bool conn);
+	void setDirection(PortDirection direction);
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Boolean methods}
+
+This methods are used to get information about a specific state of a Port object.\\
+We are not going to explain them since we think they're enougth self explanatory , based on the corresponding attributes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	//Booleans
+	bool isValidPortDirection();
+	bool isInputPort();
+	bool isOutputPort();
+	bool isInOutPort();
+	bool isInvalidPort();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Adders methods}
+
+These methods are used for adding a specific element to a Port.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	//Used for adding an input Signal to the Port.
+	void pushInputSignals(Signal::Signal sig);
+	//Used for adding an output Signal to the port
+	void pushOutputSignals(Signal::Signal sig);
+	//Used for adding an InOut Signal the port.
+	void pushInOutSignal(Signal::Signal sig);
+	//Used for adding an edge to the port
+	void addEdge(int edgeId);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{pushInOutSignal(Signal::Signal sig)}\\
+Since we don't have a list for InOut signals (because it would have been redundant), when we push a new InOut signal, we are simply adding such
+signal to both the inputSignals and outputSignals vectors.\\\\
+
+\subsubsection{toString() method}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	//toString();
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 5
+%----------------------------------------------------------------------------------------
+
+\section{Node}
+
+Namespace that contains several the class for representing a node (i.e. a component of the circuit).\\
+Nodes are equivalent to both atomic components like mux, adders etc. (RTLIL::Cell)  and modules (RTLIL::Module), depending on the nature of associated 
+components.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & node\_library.h\\
+	\textbf{Implementation File:} & node\_library.cc\\
+	\textbf{Namespace: } & Graph\_Node\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Struct
+	class Node{...};
+	\end{lstlisting}
+\end{mdframed}
+\subsection{Node Strcuture}
+
+This structure has been used for representing node (i.e. component) associated to a circuit.\\
+Their Yosys equivalent are the RTLIL::Cell which in some cases are only placeholders for RTLIL::Modules.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & Graph\_Node::Node\\
+	\textbf{Yosys equivalent: } & RTLIL::Cell \\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	private:
+		int nodeID;
+		std::string name;
+		std::string type;
+		bool modulePlaceholder ;
+		std::vector<Graph_Port::Port *> inputPorts;
+		std::vector<Graph_Port::Port *> outputPorts;
+		std::vector<Graph_Port::Port *> inoutPorts;
+		std::vector<Graph_Port::Port *> moduleDataPorts;
+		std::vector<Graph_Port::Port *> moduleSelectionPorts;
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{nodeID}\\
+Unique numeric identifier of the node.\\\\
+
+\textbf{name}\\
+name associated to a node; it represents how it is defined when it is instantiated (in case of modules) or how it is defined when translated in the RTL for by Yosys (in case of atomic components).\\\\
+
+\textbf{type}\\
+string that identify the type of a component, i.e. which element of a circuit it represents (mux, and-port,module ...).\\\\
+
+\textbf{modulePlaceholder}\\
+boolean flag setted to true in case of node representing a Module (modules are threated in a different ways since they must be inspected in their internal representation).\\\\
+
+\textbf{inputPorts}\\
+vectors of input ports of a node.\\\\
+
+\textbf{outputPorts}\\
+vectors of output ports of a node.\\\\
+
+\textbf{inoutPorts}\\
+vectors of inout ports of a node.\\\\
+
+\textbf{moduleDataPorts}\\
+vectors of output ports of a node filled (when the node is a module placeholder) with the ports that are data ports for the current node.\\\\
+
+\textbf{moduleSelectionPorts}\\
+vectors of output ports of a node filled (when the node is a module placeholder) with the ports that are selection ports for the current node.\\\\
+
+\subsubsection{Public Methods}
+
+This section lists all the methods available for the Node struct.\\
+Their meaning and usage will be explained later when needed.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	public:
+		//Constructor
+		Node(int nodeID,std::string nodeName,std::string nodeType,bool modulePlaceholder);
+		//Setters
+		bool setModulePort(Graph_Port::Port *newPort,bool data,bool selection);
+		//Canonical Getters
+		int getId();
+		std::string getName();
+		std::string getType();
+		std::vector<Graph_Port::Port *> getModuleSelectionPorts();
+		std::vector<Graph_Port::Port *> getModuleDataPorts();
+		std::vector<Graph_Port::Port *> getModuleDataSelectionPorts();
+		//Non-Canonical Getters
+		std::vector<Graph_Port::Port *> getInputs();
+		std::vector<Graph_Port::Port *> getOutputs();
+		std::vector<Graph_Port::Port *> getPorts();
+		Graph_Port::Port *getPort(int id);
+		std::vector<Signal::Signal> getInputSignals();
+		std::vector<Signal::Signal> getOutputSignals();
+		//Booleans
+		bool isEmitter();
+		bool isModulePlaceholder();
+		//Adders
+		int addPort(Graph_Port::Port *newPort,Graph_Port::Direction direction);
+		//toString()
+		std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Constructors}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+Node(int nodeID,std::string nodeName,std::string nodeType,bool modulePlaceholder);
+	\end{lstlisting}
+\end{mdframed}
+
+\underline{\textit{Note:}} It's important to notice that in this case we have only one constructor, this is due to the fact that 
+we cannot have, for example , an empty Node, since each Node correspond to a specific element that must be present in the circuit.\\
+
+\subsubsection{Setter Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	bool setModulePort(Graph_Port::Port *newPort,bool data,bool selection);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{setModulePort}\\
+method used for adding a module port to the current node (in case of moduleplaceholder).\\
+The first parameter is the port the other two are used to decree if a port is a data port, selection port or both.\\
+It returns a boolean value which is used to know if the insertion has been completed successfully (true) or not (false).\\\\
+
+\subsubsection{Canonical Getter Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	int getId();
+	std::string getName();
+	std::string getType();
+	std::vector<Graph_Port::Port *> getModuleSelectionPorts();
+	std::vector<Graph_Port::Port *> getModuleDataPorts();
+	std::vector<Graph_Port::Port *> getModuleDataSelectionPorts();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Non-canonical Getter Methods}
+
+This getter methods are called non canonical in the sens that they're not associated to class/strcut attributes but rather on groups or manipulations performed on such attributes.\\
+Their meaning and usage will be explained in the following section when needed.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::vector<Graph_Port::Port *> getInputs();
+	std::vector<Graph_Port::Port *> getOutputs();
+	std::vector<Graph_Port::Port *> getPorts();
+	Graph_Port::Port *getPort(int id);
+	std::vector<Signal::Signal> getInputSignals();
+	std::vector<Signal::Signal> getOutputSignals();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{getInputs()}\\
+Method that returns a vector that contains all the input Ports associated to a node.\\
+Here we have both Input Ports and InOut Ports.\\\\
+
+\textbf{getOutputs()}\\
+Method that returns a vector that contains all the output Ports associated to a node.\\
+Here we have both Output Ports and InOut Ports.\\\\
+
+\textbf{getPorts()}\\
+Method used for getting all the Port associated to a Node (Input, Output and InOut Ports).\\\\
+
+\textbf{ *getPort(int id)}\\
+Method that return a reference to a specific port, based on the passed id, in case such port is contained in ,at least, one of the associated vectors, return nullptr otherwise.\\\\
+
+\textbf{getInputSignals()}\\
+method that return all the input Signals that are associated to a node.\\\\
+
+\textbf{getOutputSignals()}\\
+method that return all the output Signals that are associated to a node.\\\\
+
+\subsubsection{Booleans Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	bool isEmitter();
+	bool isModulePlaceholder();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{isEmitter()}\\
+return true if at least one one of its outputs (output/inout ports) is connected to extern.\\\\
+
+\textbf{isModulePlaceholder()}\\
+return true in case of a node that is a placeholder for a module (i.e. in the current node is instantiated another module), false if the corresponding node is an atomic component.\\\\
+
+\subsubsection{Adder Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	int addPort(Graph_Port::Port *newPort,Graph_Port::Direction direction);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{addPort(Graph\_Port::Port *newPort,Graph\_Port::Direction direction)}\\
+method used for adding a specific Port to the current node.\\\\
+
+It can returns different integer values, depending on the following situations:\\
+
+%\begin{table}
+	\begin{tabular}{ll}
+	\textbf{-1} & the passed port is already present as Input Port\\
+	\textbf{-2} & the passed port is already present as Output Port\\
+	\textbf{-3} & the passed port is already present as InOut Port\\
+	\textbf{-4} & the passed port as an unknown direction\\
+	\textbf{ 1} & the passed port has been added in the corresponding vector\\
+	\end{tabular}
+%\end{table}
+
+\subsubsection{ToString method}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 6
+%----------------------------------------------------------------------------------------
+
+\section{SupportGraph}
+
+SupportGraph is both the name of the namespace and the class associated to this element of the design.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & supportGraph.h\\
+	\textbf{Implementation File:} & supportGraph.cc\\
+	\textbf{Namespace: } & SupportGraph\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Class
+	class SupportGraph{...};
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{SupportGraph Class}
+
+The SupportGraph class represents an entire module of the design: components and connections of elements of the RTLIL::Design.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & SupportGraph::SupportGraph\\
+	\textbf{Yosys equivalent: } & RTLIL::Module\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	private:
+		CellRepository::CellRepository *cellrepository;
+		std::vector<Graph_Node::Node *> nodes;
+		int numNodes;
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{cellrepository}\\
+reference to an instance of CellRepository , which is a struct used for knowing the different aspects regarding the ports of a node (explained in a farther section).\\\\
+
+\textbf{nodes}\\
+collections of all the nodes that are contained in a specific module.\\\\
+
+\textbf{numNodes}\\
+number of nodes of a specific module\\\\
+
+
+\subsubsection{Public Methods}
+
+This section lists all the methods available for the SupportGraph class.\\
+Their meaning and usage will be explained later when needed.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+//Canonical getter methods
+CellRepository::CellRepository *getCellRepository();
+std::vector<Graph_Node::Node *>getNodes();
+int getNumNodes();
+//Non canonical getter methods
+Graph_Node::Node *getNode(int id);
+//Booleans
+bool isNodeName(std::string name);
+//Adders
+int addNode(Graph_Node::Node *newNode);
+//Utilities
+std::vector<Graph_Node::Node *> nextNodes(Graph_Node::Node *node,Graph_Port::Port *port,bool discriminating,bool verbose);
+std::vector<Graph_Node::Node *> allNextNodes(Graph_Node::Node *node,bool discriminating,bool verbose);
+std::vector<std::pair<Graph_Port::Port *, int>> reachedPorts(Graph_Node::Node *sourceNode,Graph_Port::Port *sourcePort,Graph_Node::Node *destNode);
+//ToString
+std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\underline{\textit{Note: }} 
+here we don't have any explicit constructor since this class corresponds to a collection of Node-types classes.\\
+
+\subsubsection{Canonical Getter Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	CellRepository::CellRepository *getCellRepository();
+	std::vector<Graph_Node::Node *>getNodes();
+	int getNumNodes();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Non-canonical Getter Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	Graph_Node::Node *getNode(int id);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{*getNode(...)}\\
+method that returns a specific node based on the nodeid passed as parameter (nullpointer otherwise).\\\\
+
+\subsubsection{Boolean Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	bool isNodeName(std::string name);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{isNodeName(...)}\\
+checks if the passed name is the one of an existing node.\\\\
+
+\subsubsection{Adder Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	int addNode(Graph_Node::Node *newNode);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{addNode(...)}\\
+method used for adding a specific Node to the current support graph\\\\
+
+It can returns different integer values, depending on the following situations:\\
+
+%\begin{table}
+\begin{tabular}{ll}
+	\textbf{-1} & we already have a node with the same name in the current SupportGraph instance\\
+	\textbf{ 1} & we have correctly added the new node to the current SupportGraph instance%\begin{table}
+\end{tabular}
+%\end{table}
+
+\subsubsection{Utilities Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+std::vector<Graph_Node::Node *> nextNodes(Graph_Node::Node *node,Graph_Port::Port *port,bool discriminating,bool verbose);
+std::vector<Graph_Node::Node *> allNextNodes(Graph_Node::Node *node,bool discriminating,bool verbose);
+std::vector<std::pair<Graph_Port::Port *, int>> reachedPorts(Graph_Node::Node *sourceNode,Graph_Port::Port *sourcePort,Graph_Node::Node *destNode);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{nextNodes(...)}\\
+method that a vector of nodes that can be reached by the parameter node, passing through the port passed as parameter.\\
+The discriminating boolean value is used to define if we want (false) to consider as canonical-data input also the selection ports or not(true).\\
+The verbose boolean flag is used for stamping some values during each passage in case it is setted as true.\\\\
+
+\textbf{allNextNodes(...)}\\
+method that a vector of nodes that can be reached by the parameter node, by any of its output ports\\
+The discriminating boolean value is used to define if we want (false) to consider as canonical-data input also the selection ports or not(true).\\
+The verbose boolean flag is used for stamping some values during each passage in case it is setted as true.\\\\
+
+\textbf{reachedPorts(...)}\\
+method that returns a vector of pairs used to represents which ports of the destination nodes can be reached by the sourcePort of the sourceNode\\\\
+
+\subsubsection{ToString method}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 7
+%----------------------------------------------------------------------------------------
+
+\section{Generator}
+
+This namespace contains all the functions that we have implemented for building our custom structure starting from the RTLIL::Design.\\
+The associated class (Generator) is used for representing a module.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & generator\_library.h\\
+	\textbf{Implementation File:} & generator\_library.cc\\
+	\textbf{Namespace: } & Generator\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Constants
+	NONE 'N'
+	SELECT 'S'
+	DATA 'D'
+	BOTH 'B'
+	ERROR_CODE 'E'
+	//Static functions
+	char nextLetter(char currentNode,std::pair<bool, bool> data_select);
+	//Class
+	struct Generator : SubCircuit_v2::Graph{...}
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{Constants}
+
+These constants has been used for defining the type of signal associated to each bit of a Signal.
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//The signal bit is not used
+	NONE 'N'
+	//The signal bit is used as selection
+	SELECT 'S'
+	//The signal bit is used as data
+	DATA 'D'
+	//The signal bit is used both as data and selection
+	BOTH 'B'
+	//Invalid value
+	ERROR_CODE 'E'
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{Static functions}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	char nextLetter(char currentNode,std::pair<bool, bool> data_select);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{nextLetter(...)}\\
+Static utility function that decides what letter the support structure shall contains for each bit of each signal.\\\\
+
+\subsection{Generator class}
+
+This class has been used for representing a module of the design but is not only that, it is a top-level container used for performing also
+Operations on such module.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & Generator::Generator\\
+	\textbf{Yosys equivalent: } & RTLIL::Module\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	private:
+	std::string moduleName;
+	SupportGraph::SupportGraph sg;
+	std::vector<Signal::Signal> externalSignals;
+	std::vector<Signal::Signal> enteringSignals;
+	std::vector<Signal::Signal> exitingSignals;
+	std::vector<Signal::Signal> inoutSignals;
+	std::vector<std::pair<std::string,std::string>> coupledSignals;
+	std::vector<std::pair<Signal::Signal,Signal::Signal>> pairedSignals;
+	std::vector<std::pair<std::string,std::string>> innerModules;
+	std::vector<std::pair<Signal::Signal, std::vector<char>>> sliceStructure;
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{moduleName}\\
+name of the module that Generator wrap.\\\\
+
+\textbf{sg}\\
+Internal structure of a single module.\\\\
+
+\textbf{externalSignals}\\
+vector of external signals of the module.\\\\
+
+\textbf{enteringSignals}\\
+Vector of signals entering the module\\\\
+
+\textbf{exitingSignals}\\
+vector of signals exiting the module\\\\
+
+\textbf{inoutSignals}\\
+Vector of inout signals of the module\\\\
+
+\textbf{coupledSignals}\\
+Support structure to fill the exitingSignals even in case of signal renaming.\\\\
+
+\textbf{pairedSignals}\\
+vector that contains all the infos related to coupled signals.\\\\
+
+\textbf{innerModules}\\
+Set of modules that are instantiated inside the current module (<name , type>), used to decree if a module is atomic or not.\\\\
+
+\textbf{sliceStructure}\\
+Support for bit condensing.\\\\
+
+\subsubsection{Private Methods}
+
+This section lists and explains the functions of each private method.\\
+They're not directly accessible but they're very important for our application since they're responsable for building the entire application architecture.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+private:
+	void fillSignalStructure();
+	void extractInnerModules();
+	std::pair<std::vector<Signal::Signal>,std::vector<Signal::Signal>> extractModuleOutputBinding(RTLIL::Module *module);
+	void setCellModuleOutputBindings(RTLIL::Cell *cell,Graph_Port::Port *newPort,std::pair<std::vector<Signal::Signal>, std::vector<Signal::Signal>> moduleOutputBindings,bool inout);
+	bool buildGraph(SubCircuit_v2::Graph\& myg, RTLIL::Module *module);
+	bool buildConsistentGraph(SubCircuit_v2::Graph\& myg,RTLIL::Module *module,bool verbose=false);
+	void prepareSlices();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{fillSignalStructure(...)}\\
+Method that corrects the content of externalSignals and co.\\\\
+
+\textbf{extractInnerModules(...)}\\
+Method used for automatically extract inner modules from internal structure.\\\\
+
+\textbf{extractModuleOutputBinding(...)}\\
+Method used for extracting the connections between internal cells outputs and the module's outputs.\\\\
+
+\textbf{setCellModuleOutputBindings(...)}\\
+Method used for knowing if a specific cell's output has some bindings with the module's outputs\\\\
+
+\textbf{buildGraph(...)}\\
+Method that generates the final graph of a module by taking the default subcircuit graph and the design.\\\\
+
+\textbf{buildConsistentGraph(...)}\\
+Method that builds the final graph and then check it's consistency.\\\\
+
+\textbf{prepareSlices(...)}\\
+Method that returns the structure we need to perform bit condensing.
+
+\subsubsection{Protected Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	protected:
+	//Check that no port has direction INVALID_PORT
+	int CHECK_portIsValid(bool verbose=false);
+	//Check portId validity
+	int CHECK_portIDValid(bool verbose=false);
+	//Ports connected to extern must be outputs or inouts
+	int CHECK_portConnectionToExtern(bool verbose=false);
+	//Check that nodes where counted correctly
+	int CHECK_correctNumOfNodes(bool verbose=false);
+	//Checking that inputs are not set on output ports and viceversa
+	int CHECK_consistentSignalVectors(bool verbose=false);
+	//Method used to check if results of startingNodes and endingNodes matches with Receiver and Emitter nodes
+	int CHECK_SE_match_RE(bool verbose=false);
+	//Check slice structure's consistency
+	int CHECK_StructureSupport(bool verbose=false);
+	//After we have build the graph, we need to check if everything was done correctly. This method does so.
+	bool check(bool verbose=false);
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	//Constructor
+	Generator(SubCircuit_v2::Graph& myg, RTLIL::Module *module, bool verbose=false);
+	//Setters
+	void setSliceStructure( std::vector< std::pair< Signal::Signal, std::vector<char> > > structure );
+	//Core methods
+	std::vector<Signal::Signal> findSignalFriends(Signal::Signal sig, bool includeSelf);
+	std::vector<Graph_Node::Node *> startingNodes_fullSignal( Signal::Signal externalSignal, bool discriminating, bool verbose=false);
+	std::vector<Graph_Node::Node *> startingNodes_byNameOnly( Signal::Signal externalSignal, bool discriminating, bool verbose=false );
+	std::string getRenaming(std::string signalName, bool getNew=true);
+	bool isExternalSignal_byNameOnly(Signal::Signal signal);
+	std::vector<Graph_Node::Node *> signalReceivers(bool discriminating);
+	std::vector<Graph_Node::Node *> signalEmitters();
+	bool isReceiver(Graph_Node::Node *node);
+	std::string condenseBit();
+	bool isAtomic();
+	//Getters
+	std::string getModuleName(){ return this->moduleName; }
+	SupportGraph::SupportGraph getSupportGraph();
+	std::vector<Signal::Signal> getEnteringSignals();
+	std::vector<Signal::Signal> getExitingSignals();
+	std::vector<Signal::Signal> getExternalSignals();
+	std::vector<std::pair< Signal::Signal, std::vector<char> > > getSliceStructure();
+	std::vector<std::pair<std::string, std::string> > getCoupledSignals();
+	std::vector<std::pair<Signal::Signal, Signal::Signal>> getPairedSignals();
+	std::vector<std::pair<std::string,std::string>> getInnerModules();
+	std::vector<Signal::Signal> getInoutSignals();
+	//toString()
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Constructors}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	Generator(SubCircuit_v2::Graph& myg, RTLIL::Module *module, bool verbose=false);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{Generator(...)}\\
+Method used for building a new Generator starting from an RTLIL::Module.\\
+The SubcircuitGraph is passed as a reference for the internal structure (to be setted) an the verbose boolean flag is
+used for define if we have to show passages during the building of the Generator\\\\
+
+\subsubsection{Setter Method}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	void setSliceStructure( std::vector< std::pair< Signal::Signal, std::vector<char> > > structure );
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{setSliceStructure(...)}\\
+Method used for preparing the slice structure for the current Generator\\\\
+
+\subsubsection{Core Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::vector<Signal::Signal> findSignalFriends(Signal::Signal sig, bool includeSelf);
+	std::vector<Graph_Node::Node *> startingNodes_fullSignal( Signal::Signal externalSignal, bool discriminating, bool verbose=false);
+	std::vector<Graph_Node::Node *> startingNodes_byNameOnly( Signal::Signal externalSignal, bool discriminating, bool verbose=false );
+	std::string getRenaming(std::string signalName, bool getNew=true);
+	bool isExternalSignal_byNameOnly(Signal::Signal signal);
+	std::vector<Graph_Node::Node *> signalReceivers(bool discriminating);
+	std::vector<Graph_Node::Node *> signalEmitters();
+	bool isReceiver(Graph_Node::Node *node);
+	std::string condenseBit();
+	bool isAtomic();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{findSignalFriends(...)}\\
+Method that , given a signal,returns all the slices sig[x:y] which appear as inputs in some ports.\\\\
+
+\textbf{startingNodes\_fullSignal(...)}\\
+ethod that, given the name of a signal, returns a list of nodes where said signal enters as a pure signal (meaning without any modification whatsoever).\\\\
+
+\textbf{startingNodes\_byNameOnly(...)}\\
+Method that, given the name of a signal, returns a list of nodes where said signal enters as a pure signal (meaning without any modification whatsoever).\\\\
+
+\textbf{getRenaming(...)}\\
+Method that finds a correspondant among the coupledSignals.\\
+If getNew, we search for a forward renaming y such that x -> y, otherwise x <- y	<newName , oldName>\\\\
+
+\textbf{isExternalSignal\_byNameOnly(...)}\\
+Method that checks if the signal passed is an external signal\\\\
+
+\textbf{signalReceivers(...)}\\
+Method that returns the list of nodes which receives as inputs signals coming from outside the current module.\\\\
+
+\textbf{signalEmitters(...)}\\
+Method that returns the list of nodes which outputs a signal exiting the current module.\\\\
+
+\textbf{isReceiver(...)}\\
+Method used to decree if the current node is a receiver or not\\\\
+
+\textbf{condenseBit(...)}\\
+Method to transform the support structure in a string.\\\\
+
+\textbf{isAtomic(...)}\\
+Method used to decide if a module contains other modules (return true) or not(return false)\\\\
+
+\subsubsection{Getter Methods}
+
+Since these are simple getter methods for the corresponding attributes , we think that their meaning and returned value is enough self-explanatory, based on what we have said before about the corresponding attributes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string getModuleName(){ return this->moduleName; }
+	SupportGraph::SupportGraph getSupportGraph();
+	std::vector<Signal::Signal> getEnteringSignals();
+	std::vector<Signal::Signal> getExitingSignals();
+	std::vector<Signal::Signal> getExternalSignals();
+	std::vector<std::pair< Signal::Signal, std::vector<char> > > getSliceStructure();
+	std::vector<std::pair<std::string, std::string> > getCoupledSignals();
+	std::vector<std::pair<Signal::Signal, Signal::Signal>> getPairedSignals();
+	std::vector<std::pair<std::string,std::string>> getInnerModules();
+	std::vector<Signal::Signal> getInoutSignals();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{ToString()}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	PART 2
+%----------------------------------------------------------------------------------------
+
+\part{Analyzers}
+
+This section contains the structures used for analyzing the design that we have dumped from the RTLIL::Design and rebuilded in our manner for our application purposes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=cyan!10]
+	\begin{lstlisting}
+	//files
+	generator_analyzer.h
+	dfs.h
+	design_analyzer.h
+	\end{lstlisting}
+\end{mdframed}
+
+
+This part differs from the previous one , since here we don't have any direct correspondence between our solution and the design provided by Yosys.\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 9
+%----------------------------------------------------------------------------------------
+
+\section{GeneratorAnalyzer}
+
+This namespace contains utilities functions used for analyzing several different aspects of the Generator structure.\\
+
+The content of this file is a class , GeneratorAnalyzer, used for testing some characteristics of the Generator class.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & generator\_analyzer.h\\
+	\textbf{Implementation File:} & generator\_analyzer.cc\\
+	\textbf{Namespace: } & GeneratorAnalyzer\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Class
+	class GeneratorAnalyzer{...}
+	\end{lstlisting}
+\end{mdframed}
+
+
+\underline{\textit{Note: }} not all the private methods and attributes will be explained here, only the relevant ones.
+
+\subsection{GeneratorAnalyzer struct}
+
+This class is used for testing several aspects of a Generator that we are going to explain in the next section.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & GeneratorAnalyzer::GeneratorAnalyzer\\
+\end{tabular}
+
+\textbf{\textit{Note: }} this struct doesn't contains any attribute since it works on passed Generator instances.\\
+
+\subsubsection{Public Methods}
+
+This section lists all the methods available for the GeneratorAnalyzer struct.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	public:
+		//Constructors
+		GeneratorAnalyzer();
+		//Testers
+		void TEST_findSignalFriends(Generator::Generator *wrappedModule);
+		void TEST_node_classification(Generator::Generator *wrappedModule);
+		void TEST_entering_emitter_nodes(Generator::Generator *wrappedModule);
+		void TEST_startingNodes(Generator::Generator *wrappedModule, bool verbose, bool checkAllSignals=false);
+		void TEST_all(Generator::Generator *wrappedModule);
+		//Printers
+		void PRINT_externalSignals(Generator::Generator *wrappedModule):
+		void PRINT_supportGraph(Generator::Generator *wrappedModule);
+		void PRINT_all(Generator::Generator *wrappedModule);
+	\end{lstlisting}
+\end{mdframed}
+
+We have such division between testers and printers since testers performs some kind of discrimination over certain attributes of a Generator , while printers simply will print all the elements that are part of a specific aspect of a Generator, regardless of their function or usage.\\
+
+\subsubsection{Public Constructors}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	//Method used for instantiating a GeneratorAnalyzer
+	GeneratorAnalyzer();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Testers}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	void TEST_findSignalFriends(Generator::Generator *wrappedModule);
+	void TEST_node_classification(Generator::Generator *wrappedModule);
+	void TEST_entering_emitter_nodes(Generator::Generator *wrappedModule);
+	void TEST_startingNodes(Generator::Generator *wrappedModule, bool verbose, bool checkAllSignals);
+	void TEST_all(Generator::Generator *wrappedModule);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{TEST\_findSignalFriends(...)}\\
+Method used for exploring all the signal friends that are present in a Generator.\\
+In will print a list of nodes that are friends and return nothing .\\\\
+
+\textbf{TEST\_node\_classification(...)}\\
+Method that prints which nodes of a generator are Emitters (node connected to , at last, one output of the module) and which nodes are Receivers (node connected to , at last, one input of the module)\\\\
+
+\textbf{TEST\_entering\_emitter\_nodes(...)}\\
+Method that prints, for every module's level signals, which nodes are Emitters or Receivers for such signal.\\\\
+
+\textbf{TEST\_startingNodes(...)}\\
+Method used for printing which nodes are starting nodes for module level's signals.\\\\
+
+\textbf{TEST\_all(...)}\\
+Method that calls all the methods above and , so , it will list all the infos printed by such methods\\\\
+
+\subsubsection{Printers}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	void PRINT_externalSignals(Generator::Generator *wrappedModule):
+	void PRINT_supportGraph(Generator::Generator *wrappedModule);
+	void PRINT_all(Generator::Generator *wrappedModule);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{PRINT\_externalSignals(...)}\\
+Method that prints on screen all the external signals of a module.\\\\
+
+\textbf{PRINT\_supportGraph(...)}\\
+Method that prints the support graph (internal structure) of a module.\\\\
+
+\textbf{PRINT\_all(...)}\\
+Method that calls all the method above, printing all the infos printed by such method but with a single function call.\\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 10
+%----------------------------------------------------------------------------------------
+
+\section{DFS}
+
+This file contains all the data structures and methods used for analyzing signals and decree if a signal is selection , data one , both or none.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & dfs.h\\
+	\textbf{Implementation File:} & dfs.cc\\
+	\textbf{Namespace: } & DFS\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Classes
+	class DFSDSS{...}
+	class DFS{...}
+	\end{lstlisting}
+\end{mdframed}
+
+
+\underline{\textit{Note: }} not all the private methods and attributes will be explained here, only the relevant ones.
+
+\subsection{DFSDSS class}
+
+This class is used for storing the results of the DFS analysis performed on a specific module.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & DFS::DFSDSS\\
+\end{tabular}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	private:
+		//Reference to the module we're analyzing
+		Generator::Generator *targetModule;
+		//Signals that we have already analyzed along the result <data=bool,select=bool>
+		std::vector< std::pair<Signal::Signal, std::pair<bool, bool>>> previouslyProcessedResults;
+	public:
+		//Constructors
+		DFSDSS(Generator::Generator *targetModule);
+		//Setters
+		void setPreviouslyProcessedResults(std::vector< std::pair<Signal::Signal, std::pair<bool, bool>>> previouslyProcessedResults);
+		//Getters
+		Generator::Generator *getTargetModule();
+		std::vector< std::pair<Signal::Signal, std::pair<bool, bool>>> getPreviouslyProcessedResults();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{DFS class}
+
+Class used for perfmoing the DFS , in order to decree if a signal is a data, selection , both or none of the mentioned cases.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & DFS::DFS\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	private:
+		//Reference of the module that we are analyzing
+		Generator::Generator *currentModule;
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Private Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	private:
+		bool DFS_MooreCorrection( Signal::Signal signal );
+		void DFS_Data( Graph_Node::Node *currentNode, std::vector<bool> visited, bool &data );
+		void DFS_Select( Graph_Node::Node *currentNode, std::vector<bool> visited, bool &select );
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{DFS\_MooreCorrection(...)}\\
+Method that covers the last possible selection case that the DFS could not cover due to forced discrimination.\\
+If the signal enters straight into a selection port, discrimination will trim the whole node before the analysis could proceed.\\\\
+
+\textbf{DFS\_Data(...)}\\
+Method that performs the checks to know whether a signal is a data signal. The result is stored inside bool\& data.\\\\
+
+\textbf{DFS\_Select(...)}\\
+Method that performs the checks to know whether a signal is a selection signal. The result is stored inside bool\& select.\\\\
+
+\subsubsection{Protected Methods}
+
+This section contains the methods that are used for testing functionalities of this class over the currentModule passed.\\
+They has been used for debugging purpose and has been kept , since we think that they're output can be meaningful or, at last , interesting.\\
+Since they're quite easy to understand and use , we are not going to describe them in detail.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	protected:
+		//Method that prints the result of the DFS over all the current module's nodes.
+		void TEST_DFS_NodeAnalyzer();
+		//Method that prints the result of the DFS over all the current module's external signals.
+		void TEST_DFS_SignalAnalyzer();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	public:
+	//Constructors
+	DFS( Generator::Generator *currentModule);
+	//Getters
+	Generator::Generator *getCurrentModule();
+	//Core methods
+	std::pair<bool, bool> DFS_SignalAnalyzer( Signal::Signal signal, bool verbose=false );
+	std::pair<bool, bool> DFS_NodeAnalyzer( Graph_Node::Node *currentNode, bool verbose=false );
+	std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > DFS_FTSA( bool verbose=false );
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Constructor}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	DFS( Generator::Generator *currentModule);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{DFS(...)}\\
+This constructor requires the currentModule to analyze.\\\\
+
+\subsubsection{Public Getters}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+public:
+	//Module on which we are operating the DFS
+	Generator::Generator *getCurrentModule();
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Core Methods}
+
+This methods are the ones that can be called from the outside (and performs the DFS on specific elements of the currentModule) and provides the DFS analysis in 
+order to decree if signals coming and going from nodes or modules are selection, data or both.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	std::pair<bool, bool> DFS_SignalAnalyzer( Signal::Signal signal, bool verbose=false );
+	std::pair<bool, bool> DFS_NodeAnalyzer( Graph_Node::Node *currentNode, bool verbose=false );
+	std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > DFS_FTSA( bool verbose=false );
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{DFS\_SignalAnalyzer(...)}\\
+Given a single signal it returns the result of a DFS Select + Data analysis in order to decree if such signal has been used as data or selection.\\\\
+
+\textbf{DFS\_NodeAnalyzer(...)}\\
+Method that prepares the field for the DFS algorithm to explore paths.\\
+The returned pair has the shape <Data, Select> .\\\\
+
+\textbf{DFS\_FTSA(...)}\\
+DFS analysis with bit slices enabled.\\
+This methods analyze all the entering signals of a module and produces , for each of them , the couple that indicates if a signal is a data or selection signal\\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 11
+%----------------------------------------------------------------------------------------
+
+\section{DesignAnalyzer}
+
+This namespace contains the definition for the class used for analyzing the RTLIL::Design which modules has been wrapped into Generators.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & design\_analyzer.h\\
+	\textbf{Implementation File:} & design\_analyzer.cc\\
+	\textbf{Namespace: } & DesignAnalyzer\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Structs
+	class Final_Results{...};
+	class DesignAnalyzer{...};
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{Final\_Results}
+
+This class is used for instantiating a single global variable (dfs\_results) that contains all the results in a user-friendly format that will be further used for storing such results in a persistent format.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & DesignAnalyzer::Final\_Results\\
+\end{tabular}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	std::string plaintext;
+	std::string xml;
+	std::string json;
+	std::string csv;
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{plaintext}\\
+In this string is contained the results that will be written in the txt file.\\\\
+
+\textbf{xml}\\
+In this string is contained the results that will be written in the xml file.\\\\
+
+\textbf{json}\\
+In this string is contained the results that will be written in the json file.\\\\
+
+\textbf{csv}\\
+In this string is contained the results that will be written in the csv file.\\\\
+
+It's important to notice that the corresponding declaration doesn't correspond to a data type definition but it is only used for instantiating the global variable defined above.//
+
+\subsection{DesignAnalyzer class}
+
+This class is used for instantiating objects that will be used for analyzing the RTLIL::Design (once it will be converted in our internal format).\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & DesignAnalyzer::DesignAnalyzer\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	//List of all the modules of the RTLIL::Design converted in our internal format
+	std::vector<Generator::Generator *> wrappedModules;
+	//Vector of DFS results associated to the design modules
+	std::vector<DFS::DFSDSS *> dfsResults;
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Private Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	private:
+		void wrapModule(RTLIL::Module *module);
+		std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > sort( std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > toSort);
+		std::vector<std::string> prepareResults( std::string title, Generator::Generator *mod, std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > allResults, bool condense=false );
+		std::string preparePlaintext( std::string title, Generator::Generator *mod, std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > allResults, bool condense=false );
+		std::string prepareXML( std::string title, Generator::Generator *mod, std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > allResults, bool condense=false );
+		std::string prepareJSON( std::string title, Generator::Generator *mod, std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > allResults, bool condense=false );
+		std::string prepareCSV( std::string title, Generator::Generator *mod, std::vector< std::pair< Signal::Signal, std::pair<bool, bool> > > allResults, bool condense=false );
+		std::vector<DFS::DFSDSS *> performDFS();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{wrapModule(...)}\\
+Method used for creating the wrapped modules (Generator instances) , each of those, representing a different module of our design\\\\
+
+\textbf{sort(...)}\\
+Method used for sorting the DFS' result\\\\
+
+\textbf{prepareResults(...)}\\
+Method used for setting the attributes of the dfs\_results struct instance.\\
+This method must be called after calling the sort on the DFS' results.\\\\
+
+\textbf{preparePlaintext(...)}\\
+Method used for setting the plaintext string field of the dfs\_results.\\\\
+
+\textbf{prepareXML(...)}\\
+Method used for setting the XML string field of the dfs\_results.\\\\
+
+\textbf{prepareJSON(...)}\\
+Method used for setting the JSON string field of the dfs\_results.\\\\
+
+\textbf{prepareCSV(...)}\\
+Method used for setting the CSV string field of the dfs\_results.\\\\
+
+\textbf{perfromtDFS(...)}\\
+Method used executing the DFS on the wrapped modules of the design , it returns a vector of results , each one corresponding to a module of the design.\\\\
+
+\subsubsection{Public Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	public:
+	//Constructors
+	DesignAnalyzer(RTLIL::Design *design);
+	//Printers
+	void PRINT_allModules();
+	void PRINT_allModulesSupportGraphs();
+	void PRINT_CoupledSignals();
+	Final_Results DFS( bool condense=false, bool pt=false, bool xm=false, bool js=false, bool cs=false);
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Constructor}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}
+	DesignAnalyzer(RTLIL::Design *design);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{DesignAnalyzer(...)}\\
+This constructor takes in input the RTLIL::Design because it uses it for building the list of wrapped modules (Generators related to design's modules).\\\\
+
+\subsubsection{Printers}
+
+These methods are used for printing data related to converted modules.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	void PRINT_allModules();
+	void PRINT_allModulesSupportGraphs();
+	void PRINT_CoupledSignals();
+	Final_Results DFS(bool condense=false, bool pt=false, bool xm=false, bool js=false, bool cs=false);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{PRINT\_allModules(...)}\\
+Method that prints all the infos related to (wrapped) modules of the design.\\\\
+
+\textbf{PRINT\_allModulesSupportGraphs(...)}\\
+Method that prints all the internal structures (supportGraph) of the wrapped modules.\\\\
+
+\textbf{PRINT\_CoupledSignals(...)}\\
+Method that prints all the coupled signals of each (wrapped) module of the design.\\\\
+
+\textbf{DFS(...)}\\
+Method that return the global variable filled with all the string attributes setted for printing the results on persistent formats. \\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	PART 3
+%----------------------------------------------------------------------------------------
+
+\part{Utilities}
+
+This part is about those files that contains functions that we call in several parts of our code and works tidly with standard Yosys RTLIL components.\\
+They're used for expanding the knowledge about Cells parameters in order to define how they can alter (or not) a signal and for dumping certain parts of the RTLIL::Design for general purposes.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=cyan!10]
+	\begin{lstlisting}
+	//files
+	cellrepo.h
+	rtlil_dumper.h
+	\end{lstlisting}
+\end{mdframed}
+
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 12
+%----------------------------------------------------------------------------------------
+
+\section{CellRepository}
+
+This namespace contains the class used for deciding the type and characteristics of a standard (non-module) cells.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & cellrepo.h\\
+	\textbf{Implementation File:} & cellrepo\_cellrepository.cc\\
+	\textbf{Implementation File:} & cellrepo\_cellstructure.cc\\
+	\textbf{Namespace: } & CellRepository\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Contents: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=green!10]
+	\begin{lstlisting}
+	//Enums
+	enum CellCategory{...};
+	//classes
+	class CellStructure{...};
+	class CellRepository{...};
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{CellCategory enum}
+
+The purpose of this enum is to define constants used to decree which types of cell are we analyzing , based on the operations that it performs.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & CellCategory::CellCategory\\
+\end{tabular}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	
+	//The cell purpose is to perform some kind of logical operation on data inputs
+	LOGICAL_OPERATOR = 0,
+	//The cell purpose is to perform some kind of arithmetical operation on data inputs
+	ARITHMETIC_OPERATOR = 1,
+	//The cell purpose is to perform operations on bit of data inputs
+	BITWISE_OPERATOR = 2,
+	//The cell purpose is to perform comparison on data inputs
+	COMPARISON_OPERATOR = 3,
+	//The cell purpose is to select among a set of possible data inputs
+	MULTIPLEXER_OPERATOR = 4,
+	//The cell purpose is to retain a value
+	RETENTION_OPERATOR = 5,
+	//The cell purpose is to reduce a vector to a scalar
+	REDUCTION_OPERATOR = 6,
+	//The cell purpose is to shift all the bits of inputs up to a defined value
+	SHIFT_OPERATOR = 7, 
+	//The operator perform a specific operation (which is not part of any other cathegory i.e. alu which can be both logical, mathematical, ...) on data inputs
+	DEDICATED_OPERATOR = 9,
+	
+	\end{lstlisting}
+\end{mdframed}
+
+\subsection{CellStructure class}
+
+This struct is used for setting and all the standard cells provided by Yosys based on their type and ports.\\
+
+\begin{tabular}{ll}
+	\textbf{External usage: } & CellCategory::CellStructure\\
+\end{tabular}
+
+\subsubsection{Private Attributes}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	private:
+		//Type of the cell
+		std::string type ;
+		//Which operation the cell can perform
+		CellCategory category ;
+		//Boolean flag used for decide is a cell is a cell that its purpose is to change the signal in any way
+		bool signal_changer ;
+		//List of data input ports for a cell
+		std::vector<std::string> data_inputs;
+		//List of selection input ports for a cell
+		std::vector<std::string> selection_inputs;
+		//List of output ports of a cell.
+		std::vector<std::string> outputs; 
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Private Methods}
+
+Since all these methods are simple setters , used for setting the attributes listed above , we think that they're usage is enought self explanatory.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+private:
+	void setType(std::string type);
+	void setCategory(CellCategory category);
+	void setSignalChanger(bool signal_changer);
+	void setDataInputs(std::vector<std::string> data_inputs);
+	void setSelectionInputs(std::vector<std::string> selection_inputs);
+	void setOutputs(std::vector<std::string> outputs);
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Public Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	public:
+	//Constructors
+	CellStructure(std::string type, CellCategory category, bool signal_changer, std::vector<std::string> data_inputs,std::vector<std::string> selection_inputs, std::vector<std::string> outputs);
+	//Getters
+	std::string getType();
+	CellCategory getCategory();
+	bool getSignalChanger();
+	std::vector<std::string> getDataInputs();
+	std::vector<std::string> getSelectionInputs();
+	std::vector<std::string> getOutputs();
+	//Utilities
+	bool isDataInput(std::string unknown_port);
+	bool isSelectionInput(std::string unknown_port);
+	bool isOutput(std::string unknown_port);
+	bool isLogicalOperator();
+	bool isArithmeticOperator();
+	bool isBitwiselOperator();
+	bool isComparisonOperator();
+	bool isMultiplexerOperator();
+	bool isRetentionOperator();
+	bool isReductionOperator();
+	bool isShiftOperator();
+	bool isDedicatedOperator();
+	//toString()
+	std::string toString();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{CellStructure(...)}\\
+This constructor is used for creating a wrapper for Yosys standard cells.\\\\
+
+The getter methods are related to the struct attributes listed above.\\
+
+The utilities methods , instead , returns a boolean value that defines if a specific cell is used as the type of operator specified by the method name itself.\\
+
+\subsection{CellRepository class}
+
+This struct is used for analyzing the cells that are passed as nodes from outer parts of the projects in order to decide which  the nature of the node or the ports associated.\\
+
+\subsubsection{Private Attributes}
+
+In the section below , only the relevants attributes has been added and explained.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+private:
+	//List that contains all the CellStructures that are associated to YOSYS cells
+	std::vector<CellStructure *> cells_repository ;
+	\end{lstlisting}
+\end{mdframed}
+
+\subsubsection{Private Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+private:
+	void setUnaryOperatorCellStructure(std::string name,CellCategory category, bool signal_changer);
+	void setBinaryOperatorCellStructure(std::string name, CellCategory category, bool signal_changer);
+	void setMuxCellStructure(std::string name);
+	void buildCellRepository();
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{setUnaryOperatorCellStructure(...)}\\
+Method used for setting unary yosys cells into the new format.\\\\
+
+\textbf{setBinaryOperatorCellStructure(...)}\\
+Method used for setting binary yosys cells into the new format.\\\\
+
+\textbf{setMuxCellStructure(...)}\\
+Method used for setting mux yosys cells into the new format.\\\\
+
+\textbf{buildCellRepository(...)}\\
+Method used for wrapping all the Yosys RTLIL::Cells into our data format.\\\\
+
+\subsubsection{Public Methods}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	//Constructors
+	CellRepository();
+	//Getters
+	std::vector<CellStructure *> getCellRepository();
+	CellStructure *getCell(std::string cellType)
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{getCellRepository(...)}\\
+Method that returns the entire cell repository (all the wrapped RTLIL::Cell associated to atomic components).\\\\
+
+\textbf{getCell(...)}\\
+Method used for getting a specific (wrapped) cell based on its type.\\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 13
+%----------------------------------------------------------------------------------------
+
+\section{RTLIL\_DUMPER}
+
+Namespace that contains some utilities functions for translating certain components of the Yosys RTLIL in our internal representation corresponding objects.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{File:} & rtlil\_dumper.h\\
+	\textbf{Namespace: } & RTLIL\_DUMPER\\
+\end{tabular}\\
+
+This file doesn't contains any data structure, only functions.
+
+\subsubsection{Functions}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	bool isValidPortID(std::string portID);
+	std::pair<bool, int> portIDDumper(std::string portID);
+	std::pair<bool,Signal::Signal> sigChunkDumper(const RTLIL::SigChunk &chunk);
+	std::pair<bool, std::vector<Signal::Signal>> sigSpecDumper(const RTLIL::SigSpec &sig);
+	std::pair<std::vector<Signal::Signal>,std::vector<Signal::Signal>> connDumper(const RTLIL::SigSpec &left,const RTLIL::SigSpec &right);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{isValidPortID(...)}\\
+Method used for checking if an unnamed port associated to module has associated a valid id (return true) or not(return false).\\\\
+
+\textbf{portIDDumper(...)}\\
+Method used for converting a string (Which represent an RTLIL::IdString of a port) into an integer.\\\\
+
+\textbf{sigChunkDumper(...)}\\
+ Method used for converting an RTLIL::SigChunk associated to a signal to a Signal.\\
+ The first value of the pair (bool) is used to state if it was possible to convert
+ the Chunk to a Signal.\\
+ result.first = true \textit{implies} result.second = Signal\\
+ result.first = false \textit{implies} result.second = void signal -> no solution found\\\\
+ 
+ \textbf{sigSpecDumper(...)}\\
+ Method used for converting an RTLIL::SigSpec into a vector of Signals (i.e. the chunks associated to the SigSpec).\\
+ The first boolean flag of the pair states if we have reached a solution or (as in case of all constants) not.\\\\
+ 
+ \textbf{connDumper(...)}\\
+ Method used for converting an a connection among two RTLIL::Cell or modules into a pair of vectors that represents 
+ the chunks associated to such connections.\\
+ Since the connections are based on (paired) wires , we will always have that the two vectors are equals since all
+ the signals are related.\\\\
+ 
+  \sectionbreak{\clearpage}
+ 
+ %----------------------------------------------------------------------------------------
+ %	PART 4
+ %----------------------------------------------------------------------------------------
+ 
+ \part{Standard C++11 Support Utilities}
+ 
+This part contains some utilities created for simplify the handling of standard C++11 constructs like strings and vectors.\\
+They're not directly related to Yosys but we use them on several part of our module for simplify some tasks.\\\\ 
+ 
+ \begin{mdframed}[hidealllines=true, backgroundcolor=cyan!10]
+ 	\begin{lstlisting}
+ 	//files
+ 	stdio_support.h
+ 	stdstring_support.h
+ 	stdvector_support.h
+ 	\end{lstlisting}
+ \end{mdframed}
+ 
+ 
+ \sectionbreak{\clearpage}
+ 
+ %----------------------------------------------------------------------------------------
+ %	SECTION 14
+ %----------------------------------------------------------------------------------------
+ 
+ \section{IOSupport}
+ 
+ Namespace that contains a set of functions used for simplify the usage of the system's I/O .\\
+ We use the methods provided by this namespace for perfoming the printing of results on files.\\
+ 
+ This namespace doesn't contains any data structure , only functions.\\
+ 
+ \underline{\textit{\underline{Accessibility: }}}\\
+ 
+ \begin{tabular}{ll}
+ 	\textbf{Header File:} & stdio\_support.h\\
+ 	\textbf{Implementation File:} & stdio\_support.cc\\
+ 	\textbf{Namespace: } & IOSupport\\
+ \end{tabular}\\
+
+\subsubsection{Functions}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	//Opens FILENAME and write results in there.
+	void writeResultToCleanFile(std::string filepath, std::string results);
+	//Reset the content of a file.
+	void resetFile(std::string filepath);
+	//Append results to FILENAME.
+	void appendToFile(std::string filepath, std::string results);
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 15
+%----------------------------------------------------------------------------------------
+
+\section{StringSupport}
+
+Namespace that contains a set of functions used for simplify the usage of strings inside our module.\\
+
+This namespace doesn't contains any data structure , only functions and constants.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & stdstring\_support.h\\
+	\textbf{Implementation File:} & stdstring\_support.cc\\
+	\textbf{Namespace: } & IOSupport\\
+\end{tabular}\\
+
+\subsubsection{Functions}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	void findAndReplaceAll(std::string &data, std::string toSearch, std::string replaceStr);
+	std::string cleanse(std::string dirty, bool keepWhitespaces=false);
+	std::vector<std::string> cleanse(std::vector<std::string> dirty);
+	std::string substr_delimiter(std::string toFilter, std::string startDelimiter = DIMENSION_START, std::string endDelimiter = DIMENSION_END);
+	bool startsWith(std::string haystack, std::string needle);
+	std::vector<std::string> split(std::string input, char delimiter = WHITESPACE_CHAR, bool deleteEmpty=false, bool keepWhitespaces=false);
+	std::vector<std::string> split(std::string input, std::string delimiter, bool removeFirst=false, bool cleanse=false);
+	std::pair<int, int> extractPair(std::string pair, bool verbose=false);
+	std::pair<int, int> singleSignalExtraction(std::string signal);
+	std::vector< std::pair< std::string, std::pair<int, int> > > extractSignals(std::string toSplit, bool verbose=false);
+	bool isSingleBit( std::pair<  std::string, std::pair<int, int>  > signal );
+	bool isSingleBit( std::string signal );
+	std::string DUMP_vector(std::vector<std::string> vec, bool dividePrint=false);
+	std::string DUMP_vector(std::vector< std::pair<std::string, std::string> > vec, bool dividePrint=false);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{findAndReplaceAll(...)}\\
+Method used for replacing all the occurences of toSearch with replaceStr\\\\
+
+\textbf{cleanse(...)}\\
+Method used to cleanse the string for signal renaming analysis.\\\\
+
+\textbf{cleanse(std::vector...)}\\
+Method used to cleanse the whole vector content.\\\\
+
+\textbf{substr\_delimiter(...)}\\
+Returns the substring of toFilter between startDelimiter and endDelimiter\\\\
+
+\textbf{startsWith(...)}\\
+Method used to decree if a certain string starts with a certain character\\\\
+
+\textbf{split(...)}\\
+Method used for splitting a string with a certain character delimiter\\\\
+
+\textbf{extractPair(...)}\\
+From the string of the shape [x,y] return x and y within the std::pair.\\\\
+
+\textbf{singleSignalExtraction(...)}\\
+Extract all the info about a signal.\\\\
+
+\textbf{extractSignals(...)}\\
+Given a bunch of signal informations, return them in an organized way, highlithing both name and used bit of that signal\\\\
+
+\textbf{isSingleBit(std::pair...)}\\
+Is a single bit signal? <for pair>\\\\
+
+\textbf{isSingleBit(std::string...)}\\
+Is a single bit signal? <for string>\\\\
+
+\textbf{DUMP\_vector(...)}\\
+Returns a string representation of the string vector.\\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 16
+%----------------------------------------------------------------------------------------
+\section{VectorSupport}
+
+Namespace that contains a set of functions used for simplify the usage of std::vectors inside our module.\\
+
+This namespace doesn't contains any data structure , only functions.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & stdio\_vector.h\\
+	\textbf{Implementation File:} & stdio\_vector.h\\
+	\textbf{Namespace: } & VectorSupport\\
+\end{tabular}\\
+
+\subsubsection{Functions}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+public:
+	std::vector<T> append(std::vector<T> source, std::vector<T> toAppend);
+	bool isIn(std::vector<T> haystack, T needle);
+	std::vector<T> conditionalInsert(std::vector<T> vector, T toInsert);
+	std::vector<T> merge(std::vector<T> left, std::vector<T> right);
+	std::vector<T> minus(std::vector<T> inHere, std::vector<T> notInHere);
+	bool equals(std::vector<T> first, std::vector<T> second);
+	void pop_n( std::vector<T>& vec, int n=0);
+	\end{lstlisting}
+\end{mdframed}
+
+\textbf{append(...)}\\
+Function that safely concatenate two vectors.\\\\
+
+\textbf{isIn(...)}\\
+Function that performs a linear search in a vector\\\\
+
+\textbf{conditionalInsert(...)}\\
+Function that performs an insert with no repetitions.\\\\
+
+\textbf{merge(...)}\\
+Function that merge the given vectors with no repetitions.\\\\
+
+\textbf{minus(...)}\\
+Function that returns the vector of elements which are in the first but not in the second vector.\\\\
+
+\textbf{equals(...)}\\
+Function that returns the vector of elements which are in the first but not in the second vector.\\\\
+
+\textbf{pop\_n(...)}\\
+Function that delete n-th element\\\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	PART 5
+%----------------------------------------------------------------------------------------
+
+\part{External Yosys Modules}
+
+In this section , we have decided to briefly explains which are the external Yosys files that we have slightly modified in order to make our application.\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=cyan!10]
+	\begin{lstlisting}
+	//files
+	circuit.h
+	circuit.cc
+	module_to_graph.h
+	\end{lstlisting}
+\end{mdframed}
+
+This files comes from the default Yosys GIT repository and we have only slightly modified them in order to allow our application to extract data from the Yosys RTLIL::Design.
+
+
+\sectionbreak{\clearpage}
+
+
+%----------------------------------------------------------------------------------------
+%	SECTION 17
+%----------------------------------------------------------------------------------------
+
+\section{SubCircuit\_v2}
+
+This namespace contains an implementation of the Ullmann Subgraph Isomorphism algorithm for coarse grain logic network.\\
+
+We have used its provided data structure in order to keep track of the internal structure of a node and , also , for managing the connections between nodes in our design.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & circuit.h\\
+	\textbf{Implementation File:} & circuit.cc\\
+	\textbf{Namespace: } & SubCircuit\_v2\\
+\end{tabular}\\
+
+This namespace only contains at a top level a class (Graph), used for representing the data structure parts of the RTLIL::Design corresponding to an RTLIL::Module .\\
+
+\subsubsection{Graph Class brief explanations}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=magenta!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+protected:
+	//Data structure used for keeping tracks of bit-level infos
+	struct BitRef{...};
+	//Data structure used for keeping tracks of connections between nodes
+	struct Edge{...};
+	//Data structure used for keeping tracks of bit infos related to a node port
+	struct PortBit{...};
+	//Data structure used for keeping tracks of infos regarding ports 
+	struct Port{...}
+	//data structure used for keeping tracks of infos regarding nodes
+	struct Node{...}
+	//Boolean flag used to decree if the current ports are all connected to module's level signals
+	bool allExtern;
+	std::map<std::string, int> nodeMap;
+	//List of nodes of the current module
+	std::vector<Node> nodes;
+	//List of edges of the current module
+	std::vector<Edge> edges;
+public:
+	//Constructors
+	Graph();
+	Graph(const Graph &other, const std::vector<std::string> &otherNodes);
+	
+	//Method used for creating a node filling the corresponding data structure described above
+	void createNode(std::string nodeId, std::string typeId, void *userData = NULL, bool shared = false);
+	//Method used for creating a port filling the corresponding data structure described above
+	void createPort(std::string nodeId, std::string portId, int width = 1, int minWidth = -1);
+	//Method used for creating a connection based on edges
+	void createConnection(std::string fromNodeId, std::string fromPortId, int fromBit, std::string toNodeId, std::string toPortId, int toBit, int width = 1);
+	void createConnection(std::string fromNodeId, std::string fromPortId, std::string toNodeId, std::string toPortId);
+	//Method used for adding constant values ro a port (which means that such port will not be binded to a specific signal)
+	void createConstant(std::string toNodeId, std::string toPortId, int toBit, int constValue);
+	void createConstant(std::string toNodeId, std::string toPortId, int constValue);
+	//Method used to state if a certain port is connected with module's level signals
+	void markExtern(std::string nodeId, std::string portId, int bit = -1);
+	//Method used for state that all the ports are connected to module's level signals
+	void markAllExtern();
+	void print();
+	
+	\end{lstlisting}
+\end{mdframed}
+
+
+For a more detailed explanation please check the original's yosys files (subcircuit.cc, subcircuit.h) on the official Yosys repository.\\
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	SECTION 18
+%----------------------------------------------------------------------------------------
+
+\section{ModuleToGraph}
+
+This namespace contains a single function : the module\_to\_graph function , which we have used for extracting info about an RTLIL::Module in order to fill our data structure with the corresponding data of interest.\\
+
+Also this function is part of the subcircuit.cc/subcircuit.h files of the original standard Yosys repository.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File:} & module\_to\_graph.h\\
+	\textbf{Implementation File:} & module\_to\_graph.cc\\
+	\textbf{Namespace: } & ModToGraph\\
+\end{tabular}\\
+
+This namespace contains only the definition of a support structure for working with bits :\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=gray!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	struct bit_ref_t{...};
+	\end{lstlisting}
+\end{mdframed}
+
+and the function that we have explained above
+
+\sectionbreak{\clearpage}
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=gray!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	//Function used for extracting data from an RTLIL::Module and fill the SubCircuit_v2 passed as parameter
+	std::vector< std::pair< std::string, int > > mod2graph(SubCircuit_v2::Graph &graph, RTLIL::Module *mod);
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+%----------------------------------------------------------------------------------------
+%	PART 6
+%----------------------------------------------------------------------------------------
+
+\part{Algorithms}
+
+In this section , we have decided to briefly explains which are the two intereting algorithms uysed by our application for perfroming some core operations\\
+
+%----------------------------------------------------------------------------------------
+%	SECTION 19
+%----------------------------------------------------------------------------------------
+
+\section{Setting module type nodes}
+
+In this section we are going to explore the algorithm that we have used for deciding and setting a module type node's ports in order to further manage it as any other nodes of basic cell type.\\
+
+\underline{\textit{\underline{Accessibility: }}}\\
+
+\begin{tabular}{ll}
+	\textbf{Header File: } & design\_analyzer.h\\
+	\textbf{Implementation File: } & design\_analyzer.cc\\
+	\textbf{Function: } & performDFS()\\
+\end{tabular}\\
+
+\underline{\textit{\underline{Algorithm: }}}\\
+
+\begin{mdframed}[hidealllines=true, backgroundcolor=gray!10]
+	\begin{lstlisting}[basicstyle=\tiny]
+	ASSUME: wrappedModules[] != nullptr
+	ENSURES: DFS_RESULTS & module types nodes update
+	
+	//Vector of results
+	results[] <= EMPTY
+	//Vector of analyzed modules
+	analyzedModules[] <= EMPTY
+	//Boolean flag used to decide if we have to cycle again
+	goAhead <= TRUE
+	//Here we continue to cycle untill we have explored all the modules
+	WHILE(goAhead == FALSE)
+		goAhead <= FALSE
+		//We cycle on all the wrapped modules
+		FORALL(currentModule IN wrappedModules[])
+			//If the current module is not in the analyzed modules, we check if we can proceed
+			IF(currentModule NOT IN analyzedModules)
+				FORALL(innerModule IN currentModule.innerModules[])
+					//We check if we have already analyzed the inner modules of the current module , if not , we cannot proceed yet
+					IF(innerModule NOT IN analyzedModules)
+					 goAhead <= TRUE
+					 //Otherwise we can analyze the module
+					ELSE
+						analyzedModules.add(currentModule)
+						//We perfomr the DFS on the current module
+						result = DFS(currentModule)
+						results.add(result)
+						
+						//List of signals and their nature (data/selection)
+						exploredSignals[] <= EMPTY
+						
+						//Here we perform the bit-to-bit AND on same signals in order to decide the nature of the node ports
+						FORALL(signal IN result.signals[])
+							FORALL(exploredSignal IN exploredSignals)
+								IF(signal.name == exploredSignal.name)
+									exploredSignal.isData = exploredSignal.isData OR signal.isData
+									exploredSignal.isSelection = exploredSignal.isSelection OR signal.isSelection
+								ELSE
+									exploredSignals.add(signal.name, signal.isData, signal.isSelection)
+								ENDIF
+							ENDFOR
+						ENDFOR
+						
+						//Then we update the nodes of all the other modules that corresponds to the currently analyzed one
+						FORALL(module IN wrappedModules[])
+							FORALL(node in module.nodes[])
+								//If the node equals the current module , we check its ports
+								IF(node.type == currentModule.name)
+									FORALL(port IN node.ports[])
+										FORALL(exploredSignal IN exploredSignals)
+											//If the port's name is the same of the signal, we set such port as a module port
+											//Data or selection accordingly to the result
+											IF(port.name == exploredSignal.name)
+												node.modulePort(port, exploredSignal.isData, exploredSignal.isSelection)
+											ENDIF
+										ENDFOR
+									ENDIF
+								ENDIF
+							ENDFOR
+						ENDFOR
+					ENDIF
+				ENDFOR
+			ENDIF
+		ENDFOR
+	ENDWHILE
+	
+	RETURN results
+	\end{lstlisting}
+\end{mdframed}
+
+\sectionbreak{\clearpage}
+
+
+\end{document}
