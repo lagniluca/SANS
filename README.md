@@ -21,6 +21,4 @@ If you're ready to dig in the project, follow this:
 *   [**SANS**](SANS)            :   the actual code. Instructions on how to use it can be either found in the documentation or in the .sh example in SystemVerilog directory
 *   [**Verilog**](Verilog)         :   directory containing all the samples we've tested during development. Some have been developed by us, some belongs to OpenCores - https://opencores.org/
 
-[comment]: <> (Members of this project are Lorenzo Cugini and Luca Lagni.
-This is only a port of the original project which is located on GitLab (I've decided to duplicate such project here in order to have all my projects here on github).
-Original link: https://gitlab.com/lorenzocugini/mpu)
+Members of this project were Lorenzo Cugini and Luca Lagni.
